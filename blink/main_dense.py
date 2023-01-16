@@ -95,6 +95,32 @@ def _annotate(ner_model, input_sentences):
         samples.append(record)
     return samples
 
+def _annotate_m(ner_model, input_sentences):
+    ner_output_data = ner_model.predict(input_sentences)
+    sentences = ner_output_data["sentences"]
+    mentions = ner_output_data["mentions"]
+
+    samples = []
+    for mention in mentions:
+        record = {}
+        record["label"] = "unknown"
+        record["label_id"] = -1
+        # LOWERCASE EVERYTHING !
+        record["context_left"] = sentences[mention["sent_idx"]][
+            : mention["start_pos"]
+        ].lower()
+        record["context_right"] = sentences[mention["sent_idx"]][
+            mention["end_pos"] :
+        ].lower()
+        record["mention"] = mention["text"].lower()
+        record["start_pos"] = int(mention["start_pos"])
+        record["end_pos"] = int(mention["end_pos"])
+        record["sent_idx"] = mention["sent_idx"]
+        samples.append(record)
+    # print(mentions)
+    # print(type(mentions))
+    return samples,mentions
+
 
 def _load_candidates(
     entity_catalogue, entity_encoding, faiss_index=None, index_path=None, logger=None
@@ -241,6 +267,7 @@ def _run_biencoder(biencoder, dataloader, candidate_encoding, top_k=100, indexer
     all_scores = []
     for batch in tqdm(dataloader):
         context_input, _, label_ids = batch
+        context_input = context_input.to(device=biencoder.device)
         with torch.no_grad():
             if indexer is not None:
                 context_encoding = biencoder.encode_context(context_input).numpy()
@@ -394,7 +421,12 @@ def run(
                 logger.info("test dataset mode")
 
             if test_data:
-                samples = test_data
+                # samples = test_data
+                # Load NER model
+                text = test_data
+                ner_model = NER.get_model()
+                # Identify mentions
+                samples, mentions = _annotate_m(ner_model, [text])
             else:
                 # Load test mentions
                 samples = _get_test_samples(
@@ -493,6 +525,7 @@ def run(
                     -1,
                     -1,
                     len(samples),
+                    mentions,
                     predictions,
                     scores,
                 )
@@ -537,7 +570,6 @@ def run(
                 idx += 1
             print()
         else:
-
             scores = []
             predictions = []
             for entity_list, index_list, scores_list in zip(
@@ -581,6 +613,7 @@ def run(
                 crossencoder_normalized_accuracy,
                 overall_unormalized_accuracy,
                 len(samples),
+                mentions,
                 predictions,
                 scores,
             )
